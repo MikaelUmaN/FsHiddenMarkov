@@ -47,7 +47,7 @@ let hmm = HiddenMarkovModel(A, B, pi)
 // Calling manually.
 let a, c = alphaPass A B pi O
 let b = betaPass A B O c
-let gamma, _ = gammas A B O a b
+let gamma, digamma = gammas A B O a b
 
 // Calculated gammas (state probabilities per time step):
 // val gamma : float [,] =
@@ -61,3 +61,26 @@ let gamma, _ = gammas A B O a b
 let predictedStates = hmm.PredictStateSequence O
 // And so it is.
 
+// It is interesting to see the probability of the observations.
+let logProb = hmm.ObservationProbability O
+let prob = exp logProb
+
+// Re-estimate the model, based on these observations.
+let hmmRe = hmm.EstimateModel(O)
+
+exp(hmmRe.ObservationProbability O)
+
+// Shows some interesting features.
+// Clearly the model overfits completely to the data.
+// This wouldn't be a problem if we had more data.
+
+// We have learnt that we can _never_ stay in the same weather.
+hmmRe.StateTransitionProbabilities
+// We _never_ observe small tree rings in hot weather.
+hmmRe.ObservationProbabilities
+// We _always_ start in cold weather.
+hmmRe.InitialStateDistribution
+
+// In practical applications, we need an ensemble run.
+// In practical applications, we might want to just set the initial state distribution
+// rather than estimating it like this.

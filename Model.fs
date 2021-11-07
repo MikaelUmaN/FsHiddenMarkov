@@ -77,6 +77,53 @@ module Model =
 
         gamma, digamma
 
+    /// Re-estimates each transition probability.
+    /// Returns an N x N matrix.
+    let estimateTransitionProbabilities (gamma: float[,]) (digamma: float[,,]) =
+        let T = Array2D.length2 gamma
+        let N = Array2D.length1 gamma
+
+        let aijs = 
+            [ for i in 0..N-1 ->
+                // Expected number of transitions from qi to any state.
+                let denom = [| for t in 0..T-2 -> gamma.[i, t] |] |> Array.sum
+                [| for j in 0..N-1 ->
+                    // Expected number of transitions from qi -> qj.
+                    let num = [| for t in 0..T-2 -> digamma.[i, j, t] |] |> Array.sum
+                    num/denom         
+                |]
+            ]
+
+        array2D aijs
+
+    /// Given scale factors, calculates log probability of the observations.
+    let observationProbability (c: float[]) (O: int[]) =
+
+            // Compute log probabilities.
+            let lp = c |> Array.sumBy log
+            -lp
+
+    /// Re-estimates observation probabilities, correlation to hidden states.
+    /// Returns an N x M matrix.
+    let estimateObservationProbabilities (M: int) (gamma: float[,]) (O: int[]) =
+        let T = Array2D.length2 gamma
+        let N = Array2D.length1 gamma
+
+        let bijs =
+            [ for i in 0..N-1 ->
+                // Expected number of times the model is in state qj.
+                let denom = [| for t in 0..T-1 -> gamma.[i, t] |] |> Array.sum
+                [| for k in 0..M-1 -> 
+                    // Expected number of times the model is in state qj with observation k.
+                    let obsJ = O |> Array.filter (fun o -> o = k)
+                    let idx = obsJ |> Array.map (fun o -> O |> Array.findIndex (fun oj -> o = oj )) 
+                    let num = idx |> Array.sumBy (fun t -> gamma.[i, t])
+                    num/denom
+                |]
+            ]
+
+        array2D bijs
+
     type HiddenMarkovModel
         (
             stateTransitionProbabilities: float [,],
@@ -99,16 +146,15 @@ module Model =
         let N = Array2D.length1 A
         let M = Array2D.length2 B
 
+        member _.StateTransitionProbabilities = A
+        member _.ObservationProbabilities = B
+        member _.InitialStateDistribution = pi
+
         /// Given observations, computes the probability of those observations
         /// according to the model.
         member _.ObservationProbability (O: int[]) =
-
-            // Get scale factors.
             let _, c = alphaPass A B pi O
-
-            // Compute log probabilities.
-            let lp = c |> Array.sumBy log
-            -lp
+            observationProbability c O
 
         /// Given observations, computes the most likely state sequence and returns it.
         member _.PredictStateSequence (O: int[]) =
@@ -123,11 +169,35 @@ module Model =
             let stateIndices = [|0..T-1|] |> Array.map (fun t -> gamma.[*, t] |> Array.findIndex (fun g -> g = (gamma.[*, t] |> Array.max)))
             stateIndices
 
-        member _.EstimateModel (obs: int[]) =
-            let O = obs.Clone() :?> int[]
-            let An = A.Clone() :?> float[,]
-            let Bn = B.Clone() :?> float[,]
+        /// Estimates a new model based on existing data and the new observations
+        /// Returns the new model.
+        member _.EstimateModel(O: int[], ?epsOpt: float, ?maxIterOpt: int) =
+            let eps =
+                match epsOpt with
+                | Some(e) -> e
+                | None -> 1e-6
+            let maxIter =
+                match maxIterOpt with
+                | Some(mi) -> mi
+                | None -> 1_000_000
 
+            let rec estModel Ax Bx pix lastLikelihood i =
+                let a, c = alphaPass Ax Bx pix O
+                let b = betaPass Ax Bx O c
+                let gamma, digamma = gammas Ax Bx O a b
 
-            // TODO.
-            3.
+                // Initial state distribution.
+                let pin = gamma.[*, 0]
+
+                let An = estimateTransitionProbabilities gamma digamma
+                let Bn = estimateObservationProbabilities M gamma O
+
+                // Check convergence.
+                let likelihood = observationProbability c O
+                let likelihoodDiff = likelihood - lastLikelihood
+                if likelihoodDiff > eps && i < maxIter then
+                    estModel An Bn pin likelihood (i+1)
+                else
+                    HiddenMarkovModel(An, Bn, pin)
+
+            estModel A B pi Double.NegativeInfinity 0
