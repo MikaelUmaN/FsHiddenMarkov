@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net5.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <LangVersion>preview</LangVersion>
+    <NoWarn>0049</NoWarn> <!-- Uppercase variable identifiers are standard for mathematics software. -->
     <WarnOn>3390;$(WarnOn)</WarnOn>
   </PropertyGroup>
 
